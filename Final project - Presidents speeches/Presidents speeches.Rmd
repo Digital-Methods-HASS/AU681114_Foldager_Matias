@@ -1,0 +1,354 @@
+---
+title: "Sentiment analysis - presidents speeches"
+output: html_document
+date: "2025-08-01"
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+
+library(tidyverse)
+library(here)
+
+# For text mining:
+
+library(pdftools)
+library(tidytext)
+library(textdata)
+library(ggwordcloud)
+library(RColorBrewer)
+library(patchwork)
+```
+
+## R Markdown President's Speeches
+
+
+```{r}
+pdf_text <- pdf_text("data/presidents_speeches.pdf")
+
+presidents_speeches_text <- tibble(page = 1:length(pdf_text), text = pdf_text) %>%
+  unnest_tokens(line, text, token = "lines") %>%
+  filter(str_squish(line) != "") %>%
+  mutate(linenum = row_number())
+
+presidents_speeches_text <- presidents_speeches_text %>%
+  mutate(chapter_name = case_when(
+    str_detect(line, regex("George W. Bush 1", ignore_case = TRUE)) ~ "George W. Bush 1",
+    str_detect(line, regex("George W. Bush 2", ignore_case = TRUE)) ~ "George W. Bush 2",
+    str_detect(line, regex("Barack H. Obama 1", ignore_case = TRUE)) ~ "Barack H. Obama 1",
+    str_detect(line, regex("Barack H. Obama 2", ignore_case = TRUE)) ~ "Barack H. Obama 2",
+    str_detect(line, regex("Donald J. Trump 1", ignore_case = TRUE)) ~ "Donald J. Trump 1",
+    str_detect(line, regex("Joseph R. Biden 1", ignore_case = TRUE)) ~ "Joseph R. Biden 1",
+    str_detect(line, regex("Donald J. Trump 2", ignore_case = TRUE)) ~ "Donald J. Trump 2",
+    TRUE ~ NA_character_
+  )) %>%
+  fill(chapter_name)
+
+presidents_speeches_words <- presidents_speeches_text %>%
+  unnest_tokens(word, line)
+
+bing <- get_sentiments("bing")
+
+presidents_speeches_sentiment <- presidents_speeches_words %>%
+  inner_join(bing, by = "word") %>%
+  count(chapter_name, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>%
+  mutate(net_sentiment = positive - negative)
+
+speech_order <- c(
+  "George W. Bush 1",
+  "George W. Bush 2",
+  "Barack H. Obama 1",
+  "Barack H. Obama 2",
+  "Donald J. Trump 1",
+  "Joseph R. Biden 1",
+  "Donald J. Trump 2"
+)
+
+presidents_speeches_sentiment <- presidents_speeches_sentiment %>%
+  mutate(chapter_name = factor(chapter_name, levels = speech_order))
+
+
+
+ggplot(presidents_speeches_sentiment, aes(x = chapter_name, y = net_sentiment)) +
+  geom_col(fill = "darkred") +
+  labs(title = "Net Sentiment per President's Speeches",
+       x = "Speech", y = "Net Sentiment") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+chapter_length <- presidents_speeches_words %>%
+  count(chapter_name, name = "total_words")
+
+presidents_speeches_sentiment_normalized <- presidents_speeches_sentiment %>%
+  left_join(chapter_length, by = "chapter_name") %>%
+  mutate(
+    net_sentiment_per_100_words = (net_sentiment / total_words) * 100,
+    chapter_name = factor(chapter_name, levels = speech_order)
+  )
+
+
+ggplot(presidents_speeches_sentiment_normalized, aes(x = chapter_name, y = net_sentiment_per_100_words)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Net Sentiment per 100 Words in President's Speeches",
+       x = "Speech", y = "Net Sentiment per 100 Words") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Including Plots
+
+
+```{r}
+nrc <- get_sentiments("nrc")
+
+presidents_speeches_nrc <- presidents_speeches_words %>%
+  inner_join(nrc, by = "word")
+
+nrc_summary <- presidents_speeches_nrc %>%
+  count(chapter_name, sentiment)
+
+speech_order <- c(
+  "George W. Bush 1",
+  "George W. Bush 2",
+  "Barack H. Obama 1",
+  "Barack H. Obama 2",
+  "Donald J. Trump 1",
+  "Joseph R. Biden 1",
+  "Donald J. Trump 2"
+)
+
+nrc_summary <- nrc_summary %>%
+  mutate(chapter_name = factor(chapter_name, levels = speech_order))
+
+nrc_summary %>%
+  filter(sentiment == "fear") %>%
+  ggplot(aes(x = chapter_name, y = n, group = 1)) +
+  geom_line(color = "purple", size = 1.2) +
+  labs(title = "Fear Emotion Across President's Speeches",
+       x = "Speech", y = "Word Count (Fear)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+nrc_summary %>%
+  filter(sentiment %in% c("joy", "fear", "anger", "sadness")) %>%
+  ggplot(aes(x = chapter_name, y = n, color = sentiment, group = sentiment)) +
+  geom_line(size = 1.1) +
+  labs(title = "Selected Emotions Across President's Speeches",
+       x = "Speech", y = "Count of Emotion Words") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+```{r}
+
+nrc_summary_normalized <- nrc_summary %>%
+  left_join(chapter_length, by = "chapter_name") %>%
+  mutate(freq_per_100 = (n / total_words) * 100,
+         chapter_name = factor(chapter_name, levels = speech_order)) 
+
+nrc_summary_normalized %>%
+  filter(sentiment == "fear") %>%
+  ggplot(aes(x = chapter_name, y = freq_per_100, group = 1)) +
+  geom_line(color = "purple", size = 1.2) +
+  labs(title = "Fear Emotion per 100 Words Across President's Speeches",
+       x = "Speech", y = "Fear Words per 100 Words") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+nrc_summary_normalized %>%
+  filter(sentiment %in% c("joy", "fear", "anger", "sadness")) %>%
+  ggplot(aes(x = chapter_name, y = freq_per_100, color = sentiment, group = sentiment)) +
+  geom_line(size = 1.1) +
+  labs(title = "Selected Emotions per 100 Words Across President's Speeches",
+       x = "Speech", y = "Emotion Words per 100 Words") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+emotion_counts <- presidents_speeches_nrc %>%
+  count(chapter_name, sentiment)
+
+speech_order <- c(
+  "George W. Bush 1",
+  "George W. Bush 2",
+  "Barack H. Obama 1",
+  "Barack H. Obama 2",
+  "Donald J. Trump 1",
+  "Joseph R. Biden 1",
+  "Donald J. Trump 2"
+)
+
+# Apply the factor levels before plotting
+emotion_counts <- presidents_speeches_nrc %>%
+  count(chapter_name, sentiment) %>%
+  mutate(
+    chapter_name = factor(chapter_name, levels = speech_order),
+    sentiment = factor(sentiment)  # optional: to control y-axis order
+  )
+
+ggplot(emotion_counts, aes(x = chapter_name, y = sentiment, fill = n)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "darkred") +
+  labs(title = "Emotion Heatmap Across President's Speeches",
+       x = "Speeches", y = "Emotion", fill = "Word Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5),
+        plot.title = element_text(size = 14, face = "bold"))
+```
+```{r}
+chapter_length <- presidents_speeches_words %>%
+  count(chapter_name, name = "total_words")
+
+emotion_normalized <- emotion_counts %>%
+  left_join(chapter_length, by = "chapter_name") %>%
+  mutate(freq = n / total_words)
+
+speech_order <- c(
+  "George W. Bush 1",
+  "George W. Bush 2",
+  "Barack H. Obama 1",
+  "Barack H. Obama 2",
+  "Donald J. Trump 1",
+  "Joseph R. Biden 1",
+  "Donald J. Trump 2"
+)
+
+emotion_normalized <- emotion_normalized %>%
+  mutate (chapter_name = factor(chapter_name, levels = speech_order),sentiment = factor(sentiment))
+
+ggplot(emotion_normalized, aes(x = chapter_name, y = sentiment, fill = freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "darkred") +
+  labs(title = "Normalized Emotion Heatmap Across President's Speeches",
+       x = "Speeches", y = "Emotion", fill = "Frequency") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5),
+        plot.title = element_text(size = 14, face = "bold"))
+```
+```{r}
+emotion_normalized <- emotion_normalized %>%
+  mutate(freq_pct = freq * 100)
+
+ggplot(emotion_normalized, aes(x = chapter_name, y = sentiment, fill = freq_pct)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "darkred", name = "Emotion %") +
+  labs(title = "Normalized per 100 Words Emotion Heatmap Across President's Speeches",
+       x = "Speeches", y = "Emotion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+afinn <- get_sentiments("afinn")
+
+presidents_speeches_afinn <- presidents_speeches_words %>%
+  inner_join(afinn, by = "word")
+
+afinn_chapter_sentiment <- presidents_speeches_afinn %>%
+  group_by(chapter_name) %>%
+  summarise(
+    sentiment_score = sum(value),
+    word_count = n()
+  )
+
+chapter_length <- presidents_speeches_words %>%
+  count(chapter_name, name = "total_words")
+
+afinn_chapter_sentiment <- afinn_chapter_sentiment %>%
+  left_join(chapter_length, by = "chapter_name") %>%
+  mutate(
+    sentiment_per_word = sentiment_score / total_words
+  )
+
+speech_order <- c(
+  "George W. Bush 1",
+  "George W. Bush 2",
+  "Barack H. Obama 1",
+  "Barack H. Obama 2",
+  "Donald J. Trump 1",
+  "Joseph R. Biden 1",
+  "Donald J. Trump 2"
+)
+
+afinn_chapter_sentiment <- afinn_chapter_sentiment %>%
+  mutate(chapter_name = factor(chapter_name, levels = speech_order))
+
+ggplot(afinn_chapter_sentiment, aes(x = chapter_name, y = sentiment_per_word, group = 1)) +
+  geom_line(color = "steelblue", size = 1.2) +
+  labs(title = "Normalized AFINN Sentiment Across President's Speeches",
+       x = "Speech", y = "Average Sentiment per Word") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(afinn_chapter_sentiment, aes(x = chapter_name, y = sentiment_score)) +
+  geom_col(fill = "darkgreen") +
+  labs(title = "Total AFINN Sentiment Score per President's Speeches",
+       x = "Speech",
+       y = "Total Sentiment Score") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+afinn_chapter_sentiment <- presidents_speeches_afinn %>%
+  group_by(chapter_name) %>%
+  summarise(sentiment_score = sum(value)) %>%
+  left_join(chapter_length, by = "chapter_name") %>%
+  mutate(sentiment_per_100_words = (sentiment_score / total_words) * 100)
+
+speech_order <- c(
+  "George W. Bush 1",
+  "George W. Bush 2",
+  "Barack H. Obama 1",
+  "Barack H. Obama 2",
+  "Donald J. Trump 1",
+  "Joseph R. Biden 1",
+  "Donald J. Trump 2"
+)
+
+afinn_chapter_sentiment <- afinn_chapter_sentiment %>%
+  mutate(chapter_name = factor(chapter_name, levels = speech_order))
+
+ggplot(afinn_chapter_sentiment, aes(x = chapter_name, y = sentiment_per_100_words)) +
+  geom_col(fill = "darkgreen") +
+  labs(title = "AFINN Sentiment per 100 Words per President's Speeches",
+       x = "Speech", y = "Sentiment per 100 Words") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+speech_words <- presidents_speeches_words %>%
+  anti_join(stop_words, by = "word") %>%
+  count(chapter_name, word, sort = TRUE)
+
+top_words <- speech_words %>%
+  group_by(chapter_name) %>%
+  slice_max(n, n = 10) %>%
+  ungroup()
+
+selected_chapters <- c(
+  "George W. Bush 1",
+  "George W. Bush 2",
+  "Barack H. Obama 1",
+  "Barack H. Obama 2",
+  "Donald J. Trump 1",
+  "Joseph R. Biden 1",
+  "Donald J. Trump 2"
+)
+
+wordcloud_plots <- map(selected_chapters, function(ch_num) {
+  chapter_df <- top_words %>% filter(chapter_name == ch_num)
+
+  ggplot(chapter_df, aes(label = word, size = n)) +
+    geom_text_wordcloud_area(eccentricity = 1) +
+    scale_size_area(max_size = 10) +
+    labs(title = paste("", ch_num)) +
+    theme_minimal()
+})
+
+wrap_plots(wordcloud_plots, ncol = 3) +
+  plot_annotation(title = "Top 10 Words per President's Speeches")
+```
+
